@@ -1,56 +1,52 @@
 import streamlit as st
-from openai import OpenAI
+import pandas as pd
+import zipfile
+import io
 
-# Show title and description.
-st.title("💬 Chatbot")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+st.set_page_config(page_title="NIW SmartBilling", layout="wide")
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+st.title("NIW SmartBilling")
+st.write("Automatização do registo contabilístico das faturas NIW.")
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+uploaded_file = st.file_uploader("Carrega aqui o ficheiro ZIP com os dados NIW", type="zip")
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+if uploaded_file is not None:
+    st.success("Ficheiro carregado com sucesso!")
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    with zipfile.ZipFile(uploaded_file) as z:
+        file_list = z.namelist()
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+        st.subheader("Ficheiros encontrados")
+        st.write(file_list)
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        dfs = {}
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+        for file in file_list:
+            if file.endswith(".xlsx"):
+                with z.open(file) as f:
+                    dfs[file] = pd.read_excel(f)
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.subheader("Pré-visualização dos ficheiros")
+
+        for nome, df in dfs.items():
+            st.write(f"### {nome}")
+            st.write(df.head())
+            st.write("Colunas:", list(df.columns))
+
+        st.subheader("Resultado contabilístico automático")
+
+        if len(dfs) > 0:
+            primeiro_ficheiro = list(dfs.keys())[0]
+            resultado = dfs[primeiro_ficheiro].copy()
+
+            st.write(resultado)
+
+            output = io.BytesIO()
+            resultado.to_excel(output, index=False, engine="openpyxl")
+
+            st.download_button(
+                label="Download do ficheiro contabilístico",
+                data=output.getvalue(),
+                file_name="output_contabilistico.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
